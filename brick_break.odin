@@ -19,8 +19,8 @@ BALL_START_X :: PLAYER_START_X + PLAYER_WIDTH / 2 - 7.5
 BALL_START_Y :: PLAYER_START_Y - 15
 BALL_VELOCITY :: 7
 
-BRICK_HEIGHT :: 100
-BRICK_WIDTH :: 100
+BRICK_HEIGHT :: 40
+BRICK_WIDTH :: 80
 
 colors: [18]raylib.Color = {
 	raylib.YELLOW,
@@ -55,12 +55,14 @@ Ball :: struct {
 }
 
 State :: struct {
-	rotation:   f32,
-	ball:       Ball,
-	player:     raylib.Rectangle,
-	bricks:     [dynamic]Brick,
-	game_over:  bool,
-	game_start: bool,
+	rotation:    f32,
+	ball:        Ball,
+	ball_line:   [2]raylib.Vector2,
+	player:      raylib.Rectangle,
+	bricks:      [dynamic]Brick,
+	game_over:   bool,
+	game_start:  bool,
+	game_paused: bool,
 }
 
 left_wall: raylib.Rectangle = raylib.Rectangle {
@@ -92,6 +94,11 @@ main :: proc() {
 	init_game_state(&state)
 
 	for !raylib.WindowShouldClose() {
+
+		if raylib.IsKeyPressed(raylib.KeyboardKey.P) {
+			state.game_paused = !state.game_paused
+		}
+
 		if state.game_start &&
 		   (raylib.IsKeyDown(raylib.KeyboardKey.RIGHT) ||
 				   raylib.IsKeyDown(raylib.KeyboardKey.LEFT)) {
@@ -109,7 +116,7 @@ main :: proc() {
 			init_game_state(&state)
 		}
 
-		if !state.game_over && !state.game_start {
+		if !state.game_over && !state.game_start && !state.game_paused {
 			if raylib.IsKeyDown(raylib.KeyboardKey.RIGHT) {
 				state.player.x += PLAYER_SPEED
 			}
@@ -138,7 +145,7 @@ main :: proc() {
 				state.ball.movement.y *= -1
 			}
 
-            // this is wrong.... when you hit the side jank happens
+			// this is wrong.... when you hit the side jank happens
 			if raylib.CheckCollisionRecs(state.ball.rec, state.player) {
 				state.ball.movement.y *= -1
 			}
@@ -152,65 +159,83 @@ main :: proc() {
 					width  = BRICK_WIDTH,
 				}
 
+				ball_copy := state.ball.rec
+
+				// move the ball back to where it was pre collision
+				ball_copy.x += state.ball.movement.x * -1
+				ball_copy.y += state.ball.movement.y * -1
+
+				ball_center := raylib.Vector2 {
+					ball_copy.x + ball_copy.width / 2,
+					ball_copy.y + ball_copy.height / 2,
+				}
+
+				dest := ball_center
+				dest.x += state.ball.movement.x * 50
+				dest.y += state.ball.movement.y * 50
+
+				state.ball_line[0] = ball_center
+				state.ball_line[1] = dest
+
 				if raylib.CheckCollisionRecs(state.ball.rec, brick_rec) {
+					top_left := raylib.Vector2{brick.x, brick.y}
+					top_right := raylib.Vector2{brick.x + BRICK_HEIGHT, brick.y}
+					bottom_left := raylib.Vector2{brick.x, brick.y + BRICK_HEIGHT}
+					bottom_right := raylib.Vector2{brick.x + BRICK_WIDTH, brick.y + BRICK_HEIGHT}
 
+					collision_bottom := raylib.Vector2{}
+					raylib.CheckCollisionLines(
+						ball_center,
+						dest,
+						bottom_left,
+						bottom_right,
+						&collision_bottom,
+					)
 
-                    // this is trash.... does not work right..
-					// naive implementation
-					// if moving up check if we hit the bottom
-					// if moving right check hit the left
-					// if moving left check hit the right
-					// if moving down check hit the top
+					collision_top := raylib.Vector2{}
+					raylib.CheckCollisionLines(
+						ball_center,
+						dest,
+						top_left,
+						top_right,
+						&collision_top,
+					)
 
+					collision_left := raylib.Vector2{}
+					raylib.CheckCollisionLines(
+						ball_center,
+						dest,
+						top_left,
+						bottom_left,
+						&collision_left,
+					)
 
-					// moving up and left
-					// brick_corner = 5, 5
-					// ball corner = 4, 3
-					if state.ball.movement.y <= 0 && state.ball.movement.x <= 0 {
-						fmt.println("are we here")
-						brick_corner := raylib.Vector2 {
-							brick.x + BRICK_WIDTH,
-							brick.y + BRICK_HEIGHT,
-						}
-						ball_corner := raylib.Vector2{state.ball.rec.x, state.ball.rec.y}
-						diff_x := brick_corner.x - ball_corner.x
-						diff_y := brick_corner.y - ball_corner.y
+					collision_right := raylib.Vector2{}
+					raylib.CheckCollisionLines(
+						ball_center,
+						dest,
+						top_right,
+						bottom_right,
+						&collision_right,
+					)
 
-						if (diff_x == diff_y) {
-							state.ball.movement.y *= -1
-							state.ball.movement.x *= -1
-						} else if (diff_x > diff_y) {
-							state.ball.movement.y *= -1
-						} else if (diff_x < diff_y) {
-							state.ball.movement.x *= -1
-						}
+					fmt.println(
+						"what did he hit?",
+						collision_left,
+						collision_right,
+						collision_bottom,
+						collision_top,
+					)
 
+					if (collision_bottom.x != 0 && collision_bottom.y != 0) ||
+					   (collision_top.x != 0 && collision_top.y != 0) {
+						state.ball.movement.y *= -1
 					}
 
-					// moving up and right
-					// brick_corner = 5, 5
-					// ball corner = 6, 7
-					if state.ball.movement.y <= 0 && state.ball.movement.x > 0 {
-						brick_corner := raylib.Vector2{brick.x, brick.y + BRICK_HEIGHT}
-						ball_corner := raylib.Vector2 {
-							state.ball.rec.x + state.ball.rec.height,
-							state.ball.rec.y,
-						}
-
-						diff_x := ball_corner.x - brick_corner.x
-						diff_y := ball_corner.y - brick_corner.y
-
-						if (diff_x == diff_y) {
-							state.ball.movement.y *= -1
-							state.ball.movement.x *= -1
-						} else if (diff_x > diff_y) {
-							state.ball.movement.y *= -1
-						} else if (diff_x < diff_y) {
-							state.ball.movement.x *= -1
-						}
-
+					if (collision_right.x != 0 && collision_right.y != 0) ||
+					   (collision_left.x != 0 && collision_left.y != 0) {
+						state.ball.movement.x *= -1
 					}
-
 
 					unordered_remove(&state.bricks, i)
 				}
@@ -277,8 +302,16 @@ draw :: proc(state: State) {
 	if state.game_over {
 		text := cstring("Game Over!")
 		textWidth := raylib.MeasureText(text, 20)
-		raylib.DrawText("Game Over!", WIDTH / 2 - textWidth / 2, HEIGHT / 2 - 10, 20, raylib.BLACK)
+		raylib.DrawText(text, WIDTH / 2 - textWidth / 2, HEIGHT / 2 - 10, 20, raylib.BLACK)
 	}
+
+	if state.game_paused {
+		text := cstring("Pause")
+		textWidth := raylib.MeasureText(text, 20)
+		raylib.DrawText(text, WIDTH / 2 - textWidth / 2, HEIGHT / 2 - 10, 20, raylib.BLACK)
+	}
+
+	raylib.DrawLineV(state.ball_line[0], state.ball_line[1], raylib.GREEN)
 
 	raylib.EndDrawing()
 }
