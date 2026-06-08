@@ -13,11 +13,11 @@ PLAYER_HEIGHT :: 10
 PLAYER_WIDTH :: 50
 PLAYER_START_X :: WIDTH / 2 - PLAYER_WIDTH / 2
 PLAYER_START_Y :: HEIGHT - 20
-PLAYER_SPEED :: f32(10)
+PLAYER_SPEED :: f32(6)
 
 BALL_START_X :: PLAYER_START_X + PLAYER_WIDTH / 2 - 7.5
 BALL_START_Y :: PLAYER_START_Y - 15
-BALL_VELOCITY :: 7
+BALL_VELOCITY :: 3
 
 BRICK_HEIGHT :: 40
 BRICK_WIDTH :: 80
@@ -86,6 +86,8 @@ ceiling: raylib.Rectangle = raylib.Rectangle {
 	width  = WIDTH,
 }
 
+walls: []raylib.Rectangle = {left_wall, right_wall, ceiling}
+
 main :: proc() {
 	raylib.InitWindow(WIDTH, HEIGHT, "speed run")
 	raylib.SetTargetFPS(60)
@@ -103,8 +105,7 @@ main :: proc() {
 		   (raylib.IsKeyDown(raylib.KeyboardKey.RIGHT) ||
 				   raylib.IsKeyDown(raylib.KeyboardKey.LEFT)) {
 			state.game_start = false
-			// direction := f32(rand.int_max(90) + 45)
-			direction := f32(rand.int_max(90) + 89)
+			direction := f32(rand.int_max(90) + 45)
 			angle := linalg.to_radians(direction)
 			state.ball.movement.x = -BALL_VELOCITY * math.cos_f32(angle)
 			state.ball.movement.y = -BALL_VELOCITY * math.sin_f32(angle)
@@ -112,16 +113,20 @@ main :: proc() {
 			state.ball.movement.y = -5
 		}
 
-		if state.game_over && raylib.IsKeyPressed(raylib.KeyboardKey.R) {
+		if (state.game_over || state.game_paused) && raylib.IsKeyPressed(raylib.KeyboardKey.R) {
 			init_game_state(&state)
 		}
 
 		if !state.game_over && !state.game_start && !state.game_paused {
+
+			player_speed := raylib.Vector2{}
 			if raylib.IsKeyDown(raylib.KeyboardKey.RIGHT) {
+				player_speed.x = PLAYER_SPEED
 				state.player.x += PLAYER_SPEED
 			}
 
 			if raylib.IsKeyDown(raylib.KeyboardKey.LEFT) {
+				player_speed.x = -PLAYER_SPEED
 				state.player.x -= PLAYER_SPEED
 			}
 
@@ -136,109 +141,41 @@ main :: proc() {
 			state.ball.rec.x += state.ball.movement.x
 			state.ball.rec.y += state.ball.movement.y
 
-			if raylib.CheckCollisionRecs(state.ball.rec, right_wall) ||
-			   raylib.CheckCollisionRecs(state.ball.rec, left_wall) {
-				state.ball.movement.x *= -1
-			}
+			hit := false
 
-			if raylib.CheckCollisionRecs(state.ball.rec, ceiling) {
-				state.ball.movement.y *= -1
-			}
-
-			// this is wrong.... when you hit the side jank happens
 			if raylib.CheckCollisionRecs(state.ball.rec, state.player) {
-				state.ball.movement.y *= -1
+				set_ball_position_and_direction(&state.ball, state.player, player_speed)
+				hit = true
 			}
 
-			for i := 0; i < len(state.bricks); i += 1 {
-				brick := state.bricks[i]
-				brick_rec := raylib.Rectangle {
-					x      = brick.x,
-					y      = brick.y,
-					height = BRICK_HEIGHT,
-					width  = BRICK_WIDTH,
-				}
-
-				ball_copy := state.ball.rec
-
-				// move the ball back to where it was pre collision
-				ball_copy.x += state.ball.movement.x * -1
-				ball_copy.y += state.ball.movement.y * -1
-
-				ball_center := raylib.Vector2 {
-					ball_copy.x + ball_copy.width / 2,
-					ball_copy.y + ball_copy.height / 2,
-				}
-
-				dest := ball_center
-				dest.x += state.ball.movement.x * 50
-				dest.y += state.ball.movement.y * 50
-
-				state.ball_line[0] = ball_center
-				state.ball_line[1] = dest
-
-				if raylib.CheckCollisionRecs(state.ball.rec, brick_rec) {
-					top_left := raylib.Vector2{brick.x, brick.y}
-					top_right := raylib.Vector2{brick.x + BRICK_HEIGHT, brick.y}
-					bottom_left := raylib.Vector2{brick.x, brick.y + BRICK_HEIGHT}
-					bottom_right := raylib.Vector2{brick.x + BRICK_WIDTH, brick.y + BRICK_HEIGHT}
-
-					collision_bottom := raylib.Vector2{}
-					raylib.CheckCollisionLines(
-						ball_center,
-						dest,
-						bottom_left,
-						bottom_right,
-						&collision_bottom,
-					)
-
-					collision_top := raylib.Vector2{}
-					raylib.CheckCollisionLines(
-						ball_center,
-						dest,
-						top_left,
-						top_right,
-						&collision_top,
-					)
-
-					collision_left := raylib.Vector2{}
-					raylib.CheckCollisionLines(
-						ball_center,
-						dest,
-						top_left,
-						bottom_left,
-						&collision_left,
-					)
-
-					collision_right := raylib.Vector2{}
-					raylib.CheckCollisionLines(
-						ball_center,
-						dest,
-						top_right,
-						bottom_right,
-						&collision_right,
-					)
-
-					fmt.println(
-						"what did he hit?",
-						collision_left,
-						collision_right,
-						collision_bottom,
-						collision_top,
-					)
-
-					if (collision_bottom.x != 0 && collision_bottom.y != 0) ||
-					   (collision_top.x != 0 && collision_top.y != 0) {
-						state.ball.movement.y *= -1
+			if !hit {
+				for i := 0; i < len(state.bricks); i += 1 {
+					brick := state.bricks[i]
+					brick_rec := raylib.Rectangle {
+						x      = brick.x,
+						y      = brick.y,
+						height = BRICK_HEIGHT,
+						width  = BRICK_WIDTH,
 					}
 
-					if (collision_right.x != 0 && collision_right.y != 0) ||
-					   (collision_left.x != 0 && collision_left.y != 0) {
-						state.ball.movement.x *= -1
-					}
+					if raylib.CheckCollisionRecs(state.ball.rec, brick_rec) {
+						set_ball_position_and_direction(&state.ball, brick_rec)
+						unordered_remove(&state.bricks, i)
 
-					unordered_remove(&state.bricks, i)
+						hit = true
+						break
+					}
 				}
+			}
+
+			if !hit {
+				for i := 0; i < len(walls); i += 1 {
+					if raylib.CheckCollisionRecs(state.ball.rec, walls[i]) {
+						set_ball_position_and_direction(&state.ball, walls[i])
+						hit = true
+					}
+				}
+
 			}
 
 			if state.ball.rec.y > HEIGHT {
@@ -256,8 +193,8 @@ inti_bricks :: proc(bricks: ^[dynamic]Brick) {
 	clear(bricks)
 
 	colori := 0
-	for y := BRICK_HEIGHT * 2; y < HEIGHT / 2; y += BRICK_HEIGHT * 2 {
-		for x := BRICK_WIDTH * 2; x < WIDTH; x += BRICK_WIDTH * 2 {
+	for y := BRICK_HEIGHT; y < HEIGHT / 2; y += BRICK_HEIGHT * 2 {
+		for x := BRICK_WIDTH; x < WIDTH; x += BRICK_WIDTH * 2 {
 			colori += 1
 			if (colori > len(colors) - 1) {
 				colori = 0
@@ -300,13 +237,13 @@ draw :: proc(state: State) {
 	}
 
 	if state.game_over {
-		text := cstring("Game Over!")
+		text := cstring("Game Over! R to Reset")
 		textWidth := raylib.MeasureText(text, 20)
 		raylib.DrawText(text, WIDTH / 2 - textWidth / 2, HEIGHT / 2 - 10, 20, raylib.BLACK)
 	}
 
 	if state.game_paused {
-		text := cstring("Pause")
+		text := cstring("Paused, R to reset")
 		textWidth := raylib.MeasureText(text, 20)
 		raylib.DrawText(text, WIDTH / 2 - textWidth / 2, HEIGHT / 2 - 10, 20, raylib.BLACK)
 	}
@@ -314,4 +251,30 @@ draw :: proc(state: State) {
 	raylib.DrawLineV(state.ball_line[0], state.ball_line[1], raylib.GREEN)
 
 	raylib.EndDrawing()
+}
+
+
+set_ball_position_and_direction :: proc(
+	ball: ^Ball,
+	rectangle: raylib.Rectangle,
+	speed: raylib.Vector2 = raylib.Vector2{},
+) {
+	overlap := raylib.GetCollisionRec(ball.rec, rectangle)
+	if overlap.width < overlap.height {
+		if ball.movement.x > 0 {
+			ball.rec.x -= overlap.width
+		} else {
+			ball.rec.x += overlap.width
+		}
+
+		ball.movement.x *= -1
+	} else {
+		if ball.movement.y > 0 {
+			ball.rec.y -= overlap.height
+		} else {
+			ball.rec.y += overlap.height
+		}
+
+		ball.movement.y *= -1
+	}
 }
